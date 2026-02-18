@@ -17,6 +17,8 @@ export type Database = {
       character_sheets: {
         Row: {
           age: string | null
+          alignment_law: string | null
+          alignment_moral: string | null
           armor: number
           back: string | null
           backpack_items: string[] | null
@@ -35,6 +37,7 @@ export type Database = {
           history: string | null
           hit_points: number
           horses: number
+          icon_url: string | null
           id: string
           intelligence: number
           left_hand: string | null
@@ -62,11 +65,14 @@ export type Database = {
           torso: string | null
           traps: number
           user_id: string
+          weight: string | null
           wisdom: number
           xp: number
         }
         Insert: {
           age?: string | null
+          alignment_law?: string | null
+          alignment_moral?: string | null
           armor?: number
           back?: string | null
           backpack_items?: string[] | null
@@ -85,6 +91,7 @@ export type Database = {
           history?: string | null
           hit_points?: number
           horses?: number
+          icon_url?: string | null
           id?: string
           intelligence?: number
           left_hand?: string | null
@@ -112,11 +119,14 @@ export type Database = {
           torso?: string | null
           traps?: number
           user_id: string
+          weight?: string | null
           wisdom?: number
           xp?: number
         }
         Update: {
           age?: string | null
+          alignment_law?: string | null
+          alignment_moral?: string | null
           armor?: number
           back?: string | null
           backpack_items?: string[] | null
@@ -135,6 +145,7 @@ export type Database = {
           history?: string | null
           hit_points?: number
           horses?: number
+          icon_url?: string | null
           id?: string
           intelligence?: number
           left_hand?: string | null
@@ -162,12 +173,57 @@ export type Database = {
           torso?: string | null
           traps?: number
           user_id?: string
+          weight?: string | null
           wisdom?: number
           xp?: number
         }
         Relationships: [
           {
             foreignKeyName: "character_sheets_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "game_tables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dice_rolls: {
+        Row: {
+          character_name: string | null
+          created_at: string
+          id: string
+          num_dice: number
+          num_faces: number
+          results: number[]
+          table_id: string
+          total: number
+          user_id: string
+        }
+        Insert: {
+          character_name?: string | null
+          created_at?: string
+          id?: string
+          num_dice?: number
+          num_faces?: number
+          results?: number[]
+          table_id: string
+          total?: number
+          user_id: string
+        }
+        Update: {
+          character_name?: string | null
+          created_at?: string
+          id?: string
+          num_dice?: number
+          num_faces?: number
+          results?: number[]
+          table_id?: string
+          total?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dice_rolls_table_id_fkey"
             columns: ["table_id"]
             isOneToOne: false
             referencedRelation: "game_tables"
@@ -209,6 +265,63 @@ export type Database = {
             columns: ["current_turn_character_id"]
             isOneToOne: false
             referencedRelation: "character_sheets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      map_tokens: {
+        Row: {
+          character_id: string | null
+          created_at: string
+          hit_points: number | null
+          icon_url: string | null
+          id: string
+          map_id: string
+          max_hit_points: number | null
+          name: string | null
+          token_type: string
+          x_position: number
+          y_position: number
+        }
+        Insert: {
+          character_id?: string | null
+          created_at?: string
+          hit_points?: number | null
+          icon_url?: string | null
+          id?: string
+          map_id: string
+          max_hit_points?: number | null
+          name?: string | null
+          token_type?: string
+          x_position?: number
+          y_position?: number
+        }
+        Update: {
+          character_id?: string | null
+          created_at?: string
+          hit_points?: number | null
+          icon_url?: string | null
+          id?: string
+          map_id?: string
+          max_hit_points?: number | null
+          name?: string | null
+          token_type?: string
+          x_position?: number
+          y_position?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "map_tokens_character_id_fkey"
+            columns: ["character_id"]
+            isOneToOne: false
+            referencedRelation: "character_sheets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "map_tokens_map_id_fkey"
+            columns: ["map_id"]
+            isOneToOne: false
+            referencedRelation: "table_maps"
             referencedColumns: ["id"]
           },
         ]
@@ -275,6 +388,41 @@ export type Database = {
           },
         ]
       }
+      table_maps: {
+        Row: {
+          created_at: string
+          id: string
+          image_url: string
+          is_active: boolean
+          name: string
+          table_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          image_url: string
+          is_active?: boolean
+          name: string
+          table_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          image_url?: string
+          is_active?: boolean
+          name?: string
+          table_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "table_maps_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "game_tables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       table_memberships: {
         Row: {
           id: string
@@ -300,6 +448,41 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "table_memberships_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "game_tables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      table_messages: {
+        Row: {
+          created_at: string
+          display_name: string
+          id: string
+          message: string
+          table_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name: string
+          id?: string
+          message: string
+          table_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string
+          id?: string
+          message?: string
+          table_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "table_messages_table_id_fkey"
             columns: ["table_id"]
             isOneToOne: false
             referencedRelation: "game_tables"
@@ -337,6 +520,8 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_map_table_master: { Args: { _map_id: string }; Returns: boolean }
+      is_map_table_member: { Args: { _map_id: string }; Returns: boolean }
       is_table_master: { Args: { _table_id: string }; Returns: boolean }
       is_table_member: { Args: { _table_id: string }; Returns: boolean }
     }

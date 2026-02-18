@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { X, Save, Heart, Sparkles, Coins, Swords, Shield, BookOpen } from 'lucide-react';
+import { X, Save, Heart, Sparkles, Coins, Swords, Shield, BookOpen, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Tables } from '@/integrations/supabase/types';
@@ -21,21 +21,49 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
   const { user } = useAuth();
   const isOwner = user?.id === character.user_id;
   const canEdit = isOwner || isMaster;
-  const [data, setData] = useState({ ...character });
+  const [data, setData] = useState<any>({ ...character });
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'info' | 'attributes' | 'equipment' | 'backpack'>('info');
 
+  // XP/Level system: level = floor(xp / 100), capped at maxLevel
+  const calculatedLevel = Math.min(Math.floor((data.xp || 0) / 100), maxLevel);
+  const xpForNextLevel = (calculatedLevel + 1) * 100;
+  const xpProgress = ((data.xp || 0) % 100);
+
   const update = (field: string, value: any) => {
-    setData(prev => ({ ...prev, [field]: value }));
+    setData((prev: any) => ({ ...prev, [field]: value }));
   };
 
   const handleSave = async () => {
     setSaving(true);
     const { id, created_at, table_id, user_id, ...updateData } = data;
+    // Auto-calculate level from XP
+    updateData.level = calculatedLevel;
+
+    // If player (not master), strip gold/xp/level fields
+    if (isOwner && !isMaster) {
+      delete updateData.gold;
+      delete updateData.silver;
+      delete updateData.copper;
+      delete updateData.xp;
+      delete updateData.level;
+    }
+
     const { error } = await supabase.from('character_sheets').update(updateData).eq('id', character.id);
     if (error) toast.error('Erro ao salvar: ' + error.message);
     else { toast.success('Ficha salva!'); onUpdate(); }
     setSaving(false);
+  };
+
+  const handleIconUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    const path = `${user.id}/${Date.now()}_${file.name}`;
+    const { error } = await supabase.storage.from('avatars').upload(path, file);
+    if (error) { toast.error('Erro no upload'); return; }
+    const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+    update('icon_url', urlData.publicUrl);
+    toast.success('Ícone atualizado! Salve a ficha.');
   };
 
   const NumberField = ({ label, field, min = 0, max, masterOnly = false }: { label: string; field: string; min?: number; max?: number; masterOnly?: boolean }) => {
@@ -44,11 +72,11 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
       <div className="flex items-center justify-between py-1.5">
         <span className="text-sm text-foreground">{label}</span>
         {editable ? (
-          <input type="number" value={(data as any)[field]} onChange={e => update(field, Number(e.target.value))}
+          <input type="number" value={data[field]} onChange={e => update(field, Number(e.target.value))}
             min={min} max={max}
             className="w-16 rounded-sm border border-border bg-input px-2 py-1 text-center text-sm text-foreground focus:border-gold focus:outline-none" />
         ) : (
-          <span className="font-bold text-sm text-gold">{(data as any)[field]}</span>
+          <span className="font-bold text-sm text-gold">{data[field]}</span>
         )}
       </div>
     );
@@ -58,10 +86,10 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
     <div>
       <label className="mb-1 block font-cinzel text-xs text-muted-foreground">{label}</label>
       {canEdit ? (
-        <input value={(data as any)[field] || ''} onChange={e => update(field, e.target.value)}
+        <input value={data[field] || ''} onChange={e => update(field, e.target.value)}
           className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none" />
       ) : (
-        <p className="text-sm text-foreground">{(data as any)[field] || '—'}</p>
+        <p className="text-sm text-foreground">{data[field] || '—'}</p>
       )}
     </div>
   );
@@ -88,7 +116,6 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
           className="relative max-h-[90vh] w-full max-w-3xl overflow-auto rounded-sm"
           onClick={e => e.stopPropagation()}
         >
-          {/* Parchment background */}
           <div className="relative border-ornate bg-card">
             <div className="absolute inset-0 opacity-5 rounded-sm overflow-hidden">
               <img src={parchmentBg} alt="" className="h-full w-full object-cover" />
@@ -97,10 +124,31 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
             <div className="relative z-10">
               {/* Header */}
               <div className="flex items-start justify-between border-b border-border p-6">
-                <div>
-                  <p className="font-cinzel text-xs text-muted-foreground tracking-widest">REGISTRO DE AVENTUREIRO</p>
-                  <h2 className="mt-1 font-decorative text-xl text-gold-gradient">{data.name}</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">{data.race} • {data.class} • Nível {data.level}</p>
+                <div className="flex items-center gap-4">
+                  {/* Character icon */}
+                  <div className="relative">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-gold/30 bg-secondary overflow-hidden">
+                      {data.icon_url ? (
+                        <img src={data.icon_url} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-xl font-cinzel text-muted-foreground">{data.name?.charAt(0)}</span>
+                      )}
+                    </div>
+                    {canEdit && (
+                      <label className="absolute -bottom-1 -right-1 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-gold bg-card text-gold hover:bg-gold/20">
+                        <Upload className="h-2.5 w-2.5" />
+                        <input type="file" accept="image/*" onChange={handleIconUpload} className="hidden" />
+                      </label>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-cinzel text-xs text-muted-foreground tracking-widest">REGISTRO DE AVENTUREIRO</p>
+                    <h2 className="mt-1 font-decorative text-xl text-gold-gradient">{data.name}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {data.race} • {data.class} • Nível {calculatedLevel}
+                      {data.alignment_law && data.alignment_moral && ` • ${data.alignment_law} ${data.alignment_moral}`}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   {canEdit && (
@@ -136,6 +184,7 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
                       <TextField label="Nome" field="name" />
                       <TextField label="Idade" field="age" />
                       <TextField label="Altura" field="height" />
+                      <TextField label="Peso" field="weight" />
                       <div>
                         <label className="mb-1 block font-cinzel text-xs text-muted-foreground">Raça</label>
                         {canEdit ? (
@@ -159,6 +208,26 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
                             ))}
                           </select>
                         ) : <p className="text-sm text-foreground">{data.class || '—'}</p>}
+                      </div>
+                      <div>
+                        <label className="mb-1 block font-cinzel text-xs text-muted-foreground">Alinhamento (Lei)</label>
+                        {canEdit ? (
+                          <select value={data.alignment_law || ''} onChange={e => update('alignment_law', e.target.value)}
+                            className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none">
+                            <option value="">Selecionar...</option>
+                            {['Caótico','Neutro','Leal'].map(a => <option key={a} value={a}>{a}</option>)}
+                          </select>
+                        ) : <p className="text-sm text-foreground">{data.alignment_law || '—'}</p>}
+                      </div>
+                      <div>
+                        <label className="mb-1 block font-cinzel text-xs text-muted-foreground">Alinhamento (Moral)</label>
+                        {canEdit ? (
+                          <select value={data.alignment_moral || ''} onChange={e => update('alignment_moral', e.target.value)}
+                            className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none">
+                            <option value="">Selecionar...</option>
+                            {['Bom','Neutro','Mau'].map(a => <option key={a} value={a}>{a}</option>)}
+                          </select>
+                        ) : <p className="text-sm text-foreground">{data.alignment_moral || '—'}</p>}
                       </div>
                     </div>
 
@@ -184,11 +253,23 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
                       </div>
                     </div>
 
-                    {/* Level & XP - Master only */}
+                    {/* Level & XP */}
                     <div className="card-medieval p-4">
                       <h3 className="font-cinzel text-sm text-foreground mb-3">Nível & Experiência</h3>
-                      <NumberField label="Nível" field="level" max={maxLevel} masterOnly />
+                      <div className="flex items-center justify-between py-1.5">
+                        <span className="text-sm text-foreground">Nível</span>
+                        <span className="font-bold text-sm text-gold">{calculatedLevel}</span>
+                      </div>
                       <NumberField label="Experiência (XP)" field="xp" masterOnly />
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+                          <span>Nv {calculatedLevel} → {calculatedLevel + 1}</span>
+                          <span>{data.xp || 0} / {xpForNextLevel} XP</span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
+                          <div className="h-full bg-gold rounded-full transition-all" style={{ width: `${xpProgress}%` }} />
+                        </div>
+                      </div>
                     </div>
 
                     {/* History */}
@@ -264,7 +345,7 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
                             placeholder="Corda de cânhamo&#10;Tocha&#10;Ração de viagem" />
                         ) : (
                           <ul className="text-sm text-foreground space-y-1">
-                            {(data.backpack_items || []).map((item, i) => <li key={i}>• {item}</li>)}
+                            {(data.backpack_items || []).map((item: string, i: number) => <li key={i}>• {item}</li>)}
                           </ul>
                         )}
                       </div>
@@ -284,7 +365,7 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
                             className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none" />
                         ) : (
                           <ul className="text-sm text-foreground space-y-1">
-                            {(data.mount_items || []).map((item, i) => <li key={i}>• {item}</li>)}
+                            {(data.mount_items || []).map((item: string, i: number) => <li key={i}>• {item}</li>)}
                           </ul>
                         )}
                       </div>
