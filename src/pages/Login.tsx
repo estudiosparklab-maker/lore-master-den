@@ -1,19 +1,21 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import heroBanner from '@/assets/hero-banner.jpg';
 import { Shield, Sword } from 'lucide-react';
 
 const Login = () => {
   const { user, loading, signIn } = useAuth();
+  const location = useLocation();
+  const redirectTo = (location.state as any)?.redirect || '/dashboard';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><div className="animate-torch-flicker text-gold text-xl font-cinzel">Carregando...</div></div>;
-  if (user) return <Navigate to="/dashboard" replace />;
+  if (user) return <Navigate to={redirectTo} replace />;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

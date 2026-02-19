@@ -9,7 +9,7 @@ import SceneView from '@/components/SceneView';
 import SceneChat from '@/components/SceneChat';
 import DiceFeed from '@/components/DiceFeed';
 import MapManager from '@/components/MapManager';
-import { ArrowLeft, Plus, Swords, Copy, Users, Map, Dices, Eye } from 'lucide-react';
+import { ArrowLeft, Plus, Swords, Copy, Users, Map, Dices, Eye, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import type { Tables } from '@/integrations/supabase/types';
@@ -94,6 +94,13 @@ const TableView = () => {
     toast.success('Link de convite copiado!');
   };
 
+  const shareTableLink = () => {
+    if (!id) return;
+    const link = `${window.location.origin}/join/${id}`;
+    navigator.clipboard.writeText(link);
+    toast.success('Link da mesa copiado!');
+  };
+
   const selectedChar = characters.find(c => c.id === selectedCharId);
   const currentTurnChar = characters.find(c => c.id === table?.current_turn_character_id);
   const myCharacter = characters.find(c => c.user_id === user?.id);
@@ -132,6 +139,9 @@ const TableView = () => {
           <div className="flex items-center gap-2">
             {isMaster && (
               <>
+                <button onClick={shareTableLink} className="flex items-center gap-1 rounded-sm border border-border px-2 py-1 font-cinzel text-[10px] text-muted-foreground hover:border-gold hover:text-gold transition-colors">
+                  <Share2 className="h-3 w-3" /> Compartilhar
+                </button>
                 <button onClick={createInviteLink} className="flex items-center gap-1 rounded-sm border border-border px-2 py-1 font-cinzel text-[10px] text-muted-foreground hover:border-gold hover:text-gold transition-colors">
                   <Copy className="h-3 w-3" /> Convite
                 </button>
