@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { MessageSquare, Send } from 'lucide-react';
+import { MessageSquare, Send, PanelRightClose, PanelRight } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -13,9 +13,11 @@ interface Message {
 
 interface Props {
   tableId: string;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }
 
-const SceneChat = ({ tableId }: Props) => {
+const SceneChat = ({ tableId, collapsed, onToggle }: Props) => {
   const { user, profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
@@ -45,8 +47,7 @@ const SceneChat = ({ tableId }: Props) => {
     if (!user || !text.trim()) return;
     setSending(true);
     await supabase.from('table_messages').insert({
-      table_id: tableId,
-      user_id: user.id,
+      table_id: tableId, user_id: user.id,
       display_name: profile?.display_name || 'Aventureiro',
       message: text.trim(),
     });
@@ -56,12 +57,37 @@ const SceneChat = ({ tableId }: Props) => {
 
   const formatTime = (d: string) => new Date(d).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
+  if (collapsed) {
+    return (
+      <div className="flex h-full w-10 flex-col items-center border-l border-border bg-card/50 py-3">
+        <button onClick={onToggle} className="text-muted-foreground hover:text-gold transition-colors" title="Abrir chat">
+          <PanelRight className="h-4 w-4" />
+        </button>
+        <div className="mt-2">
+          <MessageSquare className="h-4 w-4 text-gold/50" />
+        </div>
+        {messages.length > 0 && (
+          <span className="mt-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold/20 text-[8px] text-gold font-bold">
+            {messages.length > 99 ? '99+' : messages.length}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col bg-card/50">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <MessageSquare className="h-4 w-4 text-gold" />
-        <h3 className="font-cinzel text-sm text-foreground">Chat da Mesa</h3>
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-4 w-4 text-gold" />
+          <h3 className="font-cinzel text-sm text-foreground">Chat da Mesa</h3>
+        </div>
+        {onToggle && (
+          <button onClick={onToggle} className="text-muted-foreground hover:text-gold transition-colors" title="Minimizar">
+            <PanelRightClose className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -88,12 +114,8 @@ const SceneChat = ({ tableId }: Props) => {
 
       {/* Input */}
       <form onSubmit={sendMessage} className="flex gap-2 border-t border-border p-3">
-        <input
-          value={text}
-          onChange={e => setText(e.target.value)}
-          placeholder="Enviar mensagem..."
-          className="flex-1 rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none"
-        />
+        <input value={text} onChange={e => setText(e.target.value)} placeholder="Enviar mensagem..."
+          className="flex-1 rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none" />
         <button type="submit" disabled={sending || !text.trim()}
           className="rounded-sm border border-gold bg-gold/10 px-3 py-2 text-gold hover:bg-gold/20 disabled:opacity-50 transition-colors">
           <Send className="h-4 w-4" />
