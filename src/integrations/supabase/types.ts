@@ -30,6 +30,7 @@ export type Database = {
           constitution: number
           copper: number
           created_at: string
+          current_hp: number
           defense: number
           gold: number
           heavy_cutting_weapons: number
@@ -84,6 +85,7 @@ export type Database = {
           constitution?: number
           copper?: number
           created_at?: string
+          current_hp?: number
           defense?: number
           gold?: number
           heavy_cutting_weapons?: number
@@ -138,6 +140,7 @@ export type Database = {
           constitution?: number
           copper?: number
           created_at?: string
+          current_hp?: number
           defense?: number
           gold?: number
           heavy_cutting_weapons?: number
@@ -265,6 +268,44 @@ export type Database = {
             columns: ["current_turn_character_id"]
             isOneToOne: false
             referencedRelation: "character_sheets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      journal_entries: {
+        Row: {
+          character_ids: string[] | null
+          content: string
+          created_at: string
+          id: string
+          table_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          character_ids?: string[] | null
+          content?: string
+          created_at?: string
+          id?: string
+          table_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          character_ids?: string[] | null
+          content?: string
+          created_at?: string
+          id?: string
+          table_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "journal_entries_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "game_tables"
             referencedColumns: ["id"]
           },
         ]

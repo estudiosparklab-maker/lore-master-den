@@ -238,7 +238,14 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
                           <Heart className="h-4 w-4 text-blood" />
                           <h3 className="font-cinzel text-sm text-foreground">Saúde</h3>
                         </div>
-                        <NumberField label="Pontos de Vida" field="hit_points" />
+                        <NumberField label="HP Total" field="hit_points" />
+                        <NumberField label="HP Atual" field="current_hp" />
+                        <div className="mt-2">
+                          <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
+                            <div className="h-full bg-blood rounded-full transition-all" style={{ width: `${data.hit_points > 0 ? (data.current_hp / data.hit_points) * 100 : 0}%` }} />
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1 text-center">{data.current_hp} / {data.hit_points}</p>
+                        </div>
                         <NumberField label="Constituição" field="constitution" />
                         <NumberField label="Mana/Energia" field="mana" />
                       </div>
