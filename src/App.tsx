@@ -9,7 +9,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import TableView from "./pages/TableView";
-import InvitePage from "./pages/InvitePage";
+
 import JoinTable from "./pages/JoinTable";
 import NotFound from "./pages/NotFound";
 
@@ -28,7 +28,7 @@ const App = () => (
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/table/:id" element={<TableView />} />
-            <Route path="/invite/:token" element={<InvitePage />} />
+            
             <Route path="/join/:tableId" element={<JoinTable />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
