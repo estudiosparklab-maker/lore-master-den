@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Navigate, useLocation } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 import { motion } from 'framer-motion';
 import heroBanner from '@/assets/hero-banner.jpg';
 import { Shield, Sword } from 'lucide-react';
+import { toast } from 'sonner';
 
 const Login = () => {
   const { user, loading, signIn } = useAuth();
@@ -11,8 +13,10 @@ const Login = () => {
   const redirectTo = (location.state as any)?.redirect || '/dashboard';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [mode, setMode] = useState<'login' | 'register'>('login');
 
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-background"><div className="animate-torch-flicker text-gold text-xl font-cinzel">Carregando...</div></div>;
   if (user) return <Navigate to={redirectTo} replace />;
@@ -23,6 +27,28 @@ const Login = () => {
     setSubmitting(true);
     const { error } = await signIn(email, password);
     if (error) setError('Credenciais inválidas. Contacte o administrador.');
+    setSubmitting(false);
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (password.length < 6) { setError('A senha deve ter pelo menos 6 caracteres.'); return; }
+    if (!displayName.trim()) { setError('Digite seu nome de aventureiro.'); return; }
+    setSubmitting(true);
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { display_name: displayName.trim() },
+        emailRedirectTo: `${window.location.origin}${redirectTo}`,
+      },
+    });
+    if (error) {
+      setError(error.message);
+    } else {
+      toast.success('Conta criada! Verifique seu email para confirmar.');
+    }
     setSubmitting(false);
   };
 
@@ -49,11 +75,24 @@ const Login = () => {
               Velho Reino Esquecido
             </h1>
             <p className="mt-2 font-body text-muted-foreground">
-              Que os ventos do destino guiem seus passos
+              {mode === 'login' ? 'Que os ventos do destino guiem seus passos' : 'Registre-se para entrar na aventura'}
             </p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form onSubmit={mode === 'login' ? handleLogin : handleRegister} className="space-y-5">
+            {mode === 'register' && (
+              <div>
+                <label className="mb-1.5 block font-cinzel text-sm text-foreground">Nome de Aventureiro</label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  required
+                  className="w-full rounded-sm border border-border bg-input px-4 py-2.5 font-body text-foreground placeholder:text-muted-foreground focus:border-gold focus:outline-none focus:ring-1 focus:ring-gold"
+                  placeholder="Seu nome no reino"
+                />
+              </div>
+            )}
             <div>
               <label className="mb-1.5 block font-cinzel text-sm text-foreground">Email</label>
               <input
@@ -86,12 +125,24 @@ const Login = () => {
               disabled={submitting}
               className="w-full rounded-sm border border-gold bg-gold/10 px-4 py-2.5 font-cinzel text-sm font-semibold text-gold transition-all hover:bg-gold/20 hover:shadow-[0_0_20px_rgba(180,140,60,0.2)] disabled:opacity-50"
             >
-              {submitting ? 'Entrando...' : 'Entrar no Reino'}
+              {submitting ? (mode === 'login' ? 'Entrando...' : 'Criando conta...') : (mode === 'login' ? 'Entrar no Reino' : 'Criar Conta')}
             </button>
           </form>
 
           <p className="mt-6 text-center text-xs text-muted-foreground">
-            Contas são criadas pelo Administrador do reino.
+            {mode === 'login' ? (
+              <>Não tem conta?{' '}
+                <button onClick={() => { setMode('register'); setError(''); }} className="text-gold hover:text-gold-light underline">
+                  Registre-se gratuitamente
+                </button>
+              </>
+            ) : (
+              <>Já tem conta?{' '}
+                <button onClick={() => { setMode('login'); setError(''); }} className="text-gold hover:text-gold-light underline">
+                  Fazer login
+                </button>
+              </>
+            )}
           </p>
         </div>
       </motion.div>
