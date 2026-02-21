@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -46,6 +46,8 @@ const TableView = () => {
   const [bulkAction, setBulkAction] = useState<'xp' | 'damage' | 'heal' | null>(null);
   const [bulkAmount, setBulkAmount] = useState(0);
 
+  const prevCharCountRef = useRef(0);
+
   const fetchData = async () => {
     if (!id || !user) return;
 
@@ -56,7 +58,17 @@ const TableView = () => {
     ]);
 
     if (tableRes.data) setTable(tableRes.data);
-    if (charsRes.data) setCharacters(charsRes.data);
+    if (charsRes.data) {
+      // Notify master about new characters
+      if (prevCharCountRef.current > 0 && charsRes.data.length > prevCharCountRef.current) {
+        const newChars = charsRes.data.filter(c => !characters.find(old => old.id === c.id));
+        newChars.forEach(nc => {
+          toast.info(`Um jogador entrou na mesa`, { description: `${nc.name} - Personagem criado` });
+        });
+      }
+      prevCharCountRef.current = charsRes.data.length;
+      setCharacters(charsRes.data);
+    }
 
     if (membersRes.data) {
       const profiles = await supabase.from('profiles').select('user_id, display_name');
@@ -233,6 +245,7 @@ const TableView = () => {
                 <button onClick={shareTableLink} className="flex items-center gap-1 rounded-sm border border-border px-2 py-1 font-cinzel text-[10px] text-muted-foreground hover:border-gold hover:text-gold transition-colors">
                   <Copy className="h-3 w-3" /> Convite
                 </button>
+                {/* Master can always create characters */}
                 <button onClick={() => setShowCreate(true)} className="flex items-center gap-1 rounded-sm border border-gold bg-gold/10 px-2 py-1 font-cinzel text-[10px] text-gold hover:bg-gold/20 transition-colors">
                   <Plus className="h-3 w-3" /> Ficha
                 </button>
@@ -262,7 +275,7 @@ const TableView = () => {
                 <SceneView tableId={id!} isMaster={isMaster} characters={characters} members={members} onRefresh={fetchData} />
               </div>
               <div className={`h-full shrink-0 ${chatCollapsed ? 'w-10' : 'w-80'}`}>
-                <SceneChat tableId={id!} collapsed={chatCollapsed} onToggle={() => setChatCollapsed(!chatCollapsed)} />
+                <SceneChat tableId={id!} collapsed={chatCollapsed} onToggle={() => setChatCollapsed(!chatCollapsed)} characters={characters} />
               </div>
             </div>
           )}

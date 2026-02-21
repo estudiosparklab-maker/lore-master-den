@@ -21,6 +21,7 @@ export type Database = {
           alignment_moral: string | null
           armor: number
           back: string | null
+          backpack_data: Json
           backpack_items: string[] | null
           backpack_max_load: number
           belt: string | null
@@ -47,6 +48,7 @@ export type Database = {
           light_cutting_weapons: number
           long_bows: number
           mana: number
+          mount_data: Json
           mount_items: string[] | null
           mount_max_load: number
           mount_name: string | null
@@ -76,6 +78,7 @@ export type Database = {
           alignment_moral?: string | null
           armor?: number
           back?: string | null
+          backpack_data?: Json
           backpack_items?: string[] | null
           backpack_max_load?: number
           belt?: string | null
@@ -102,6 +105,7 @@ export type Database = {
           light_cutting_weapons?: number
           long_bows?: number
           mana?: number
+          mount_data?: Json
           mount_items?: string[] | null
           mount_max_load?: number
           mount_name?: string | null
@@ -131,6 +135,7 @@ export type Database = {
           alignment_moral?: string | null
           armor?: number
           back?: string | null
+          backpack_data?: Json
           backpack_items?: string[] | null
           backpack_max_load?: number
           belt?: string | null
@@ -157,6 +162,7 @@ export type Database = {
           light_cutting_weapons?: number
           long_bows?: number
           mana?: number
+          mount_data?: Json
           mount_items?: string[] | null
           mount_max_load?: number
           mount_name?: string | null
@@ -320,6 +326,7 @@ export type Database = {
           map_id: string
           max_hit_points: number | null
           name: string | null
+          token_size: number
           token_type: string
           x_position: number
           y_position: number
@@ -333,6 +340,7 @@ export type Database = {
           map_id: string
           max_hit_points?: number | null
           name?: string | null
+          token_size?: number
           token_type?: string
           x_position?: number
           y_position?: number
@@ -346,6 +354,7 @@ export type Database = {
           map_id?: string
           max_hit_points?: number | null
           name?: string | null
+          token_size?: number
           token_type?: string
           x_position?: number
           y_position?: number

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Trash2, ZoomIn, ZoomOut, RotateCcw, Users, Map, Minus, Plus, Heart, Skull, UserPlus } from 'lucide-react';
+import { Trash2, ZoomIn, ZoomOut, RotateCcw, Users, Map, Minus, Plus, Heart, Skull, UserPlus, Maximize2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Tables } from '@/integrations/supabase/types';
@@ -28,6 +28,7 @@ interface TokenRow {
   max_hit_points: number | null;
   x_position: number;
   y_position: number;
+  token_size: number;
 }
 
 interface EnemyTemplate {
@@ -65,11 +66,17 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
-  const [tokenSize, setTokenSize] = useState(40);
   const [damageTarget, setDamageTarget] = useState<{ tokenId: string; charId: string | null; name: string; isEnemy: boolean } | null>(null);
   const [damageAmount, setDamageAmount] = useState(0);
   const [showMapSelector, setShowMapSelector] = useState(false);
   const [showAddMenu, setShowAddMenu] = useState(false);
+  // Multi-select
+  const [selectedTokens, setSelectedTokens] = useState<Set<string>>(new Set());
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState({ x: 0, y: 0 });
+  const [selectionEnd, setSelectionEnd] = useState({ x: 0, y: 0 });
+  const [showViewMaps, setShowViewMaps] = useState(false);
+  const [viewingMap, setViewingMap] = useState<MapRow | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInnerRef = useRef<HTMLDivElement>(null);
 
@@ -116,22 +123,11 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
   }, [activeMap?.id]);
 
   const switchMap = async (mapId: string) => {
+    if (!isMaster) return;
     await supabase.from('table_maps').update({ is_active: false }).eq('table_id', tableId);
     await supabase.from('table_maps').update({ is_active: true }).eq('id', mapId);
     setShowMapSelector(false);
     toast.success('Mapa alterado!');
-  };
-
-  const addMyToken = async () => {
-    if (!activeMap || !myCharacter) return;
-    const existing = tokens.find(t => t.character_id === myCharacter.id);
-    if (existing) { toast.info('Você já está no mapa'); return; }
-    await supabase.from('map_tokens').insert({
-      map_id: activeMap.id, token_type: 'player', character_id: myCharacter.id,
-      name: myCharacter.name, icon_url: myCharacter.icon_url || null,
-      x_position: 50, y_position: 50,
-    });
-    toast.success('Você entrou no mapa!');
   };
 
   const addPlayerToken = async (char: CharacterSheetRow) => {
@@ -187,7 +183,7 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
     } else if (damageTarget.charId) {
       const char = characters.find(c => c.id === damageTarget.charId);
       if (char) {
-        const newHp = Math.max(0, Math.min(char.hit_points, (char as any).current_hp + amount));
+        const newHp = Math.max(0, Math.min(char.hit_points, char.current_hp + amount));
         await supabase.from('character_sheets').update({ current_hp: newHp }).eq('id', damageTarget.charId);
         onRefresh?.();
       }
@@ -197,10 +193,9 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
     if (activeMap) fetchTokens(activeMap.id);
   };
 
+  // Only master can drag tokens - players only view
   const canDragToken = (token: TokenRow) => {
-    if (isMaster) return true;
-    if (token.token_type === 'player' && token.character_id && myCharacter && token.character_id === myCharacter.id) return true;
-    return false;
+    return isMaster;
   };
 
   const handleMouseDown = (e: React.MouseEvent, tokenId: string) => {
@@ -219,13 +214,17 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
       setTokens(prev => prev.map(t => t.id === draggingToken ? { ...t, x_position: Math.max(0, Math.min(100, x)), y_position: Math.max(0, Math.min(100, y)) } : t));
       return;
     }
-    if (isPanning && isMaster) {
+    if (isSelecting && mapInnerRef.current) {
+      setSelectionEnd({ x: e.clientX, y: e.clientY });
+      return;
+    }
+    if (isPanning) {
       const dx = e.clientX - panStart.x;
       const dy = e.clientY - panStart.y;
       setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
       setPanStart({ x: e.clientX, y: e.clientY });
     }
-  }, [draggingToken, isPanning, panStart, isMaster]);
+  }, [draggingToken, isPanning, panStart, isSelecting]);
 
   const handleMouseUp = useCallback(async () => {
     if (draggingToken) {
@@ -237,18 +236,48 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
       }
       setDraggingToken(null);
     }
+    if (isSelecting && mapInnerRef.current) {
+      // Calculate selection rectangle and select tokens within it
+      const rect = mapInnerRef.current.getBoundingClientRect();
+      const x1 = Math.min(selectionStart.x, selectionEnd.x);
+      const x2 = Math.max(selectionStart.x, selectionEnd.x);
+      const y1 = Math.min(selectionStart.y, selectionEnd.y);
+      const y2 = Math.max(selectionStart.y, selectionEnd.y);
+
+      const selected = new Set<string>();
+      tokens.forEach(token => {
+        const tokenX = rect.left + (token.x_position / 100) * rect.width;
+        const tokenY = rect.top + (token.y_position / 100) * rect.height;
+        if (tokenX >= x1 && tokenX <= x2 && tokenY >= y1 && tokenY <= y2) {
+          selected.add(token.id);
+        }
+      });
+      setSelectedTokens(selected);
+      setIsSelecting(false);
+    }
     setIsPanning(false);
-  }, [draggingToken, tokens]);
+  }, [draggingToken, tokens, isSelecting, selectionStart, selectionEnd]);
 
   const handleMapMouseDown = (e: React.MouseEvent) => {
-    if (isMaster && !draggingToken) {
-      setIsPanning(true);
-      setPanStart({ x: e.clientX, y: e.clientY });
+    if (!isMaster) return;
+    if (draggingToken) return;
+    // Right-click or shift+click for selection box
+    if (e.shiftKey || e.button === 0) {
+      // Check if clicking on empty space (not a token)
+      const target = e.target as HTMLElement;
+      const isToken = target.closest('[data-token]');
+      if (!isToken && e.shiftKey) {
+        setIsSelecting(true);
+        setSelectionStart({ x: e.clientX, y: e.clientY });
+        setSelectionEnd({ x: e.clientX, y: e.clientY });
+        return;
+      }
     }
+    setIsPanning(true);
+    setPanStart({ x: e.clientX, y: e.clientY });
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    if (!isMaster) return;
     e.preventDefault();
     setZoom(prev => Math.max(0.5, Math.min(3, prev - e.deltaY * 0.001)));
   };
@@ -264,9 +293,46 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
 
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
+  const resizeTokens = async (delta: number) => {
+    if (selectedTokens.size > 0) {
+      // Resize selected tokens
+      for (const tokenId of selectedTokens) {
+        const token = tokens.find(t => t.id === tokenId);
+        if (token) {
+          const newSize = Math.max(20, Math.min(120, (token.token_size || 40) + delta));
+          await supabase.from('map_tokens').update({ token_size: newSize }).eq('id', tokenId);
+        }
+      }
+      setTokens(prev => prev.map(t => selectedTokens.has(t.id) ? { ...t, token_size: Math.max(20, Math.min(120, (t.token_size || 40) + delta)) } : t));
+    }
+  };
+
+  const resizeSingleToken = async (tokenId: string, delta: number) => {
+    const token = tokens.find(t => t.id === tokenId);
+    if (!token) return;
+    const newSize = Math.max(20, Math.min(120, (token.token_size || 40) + delta));
+    await supabase.from('map_tokens').update({ token_size: newSize }).eq('id', tokenId);
+    setTokens(prev => prev.map(t => t.id === tokenId ? { ...t, token_size: newSize } : t));
+  };
+
   if (!activeMap) {
     return (
       <div className="flex h-full flex-col">
+        {/* Player view: show other maps to browse */}
+        {!isMaster && allMaps.length > 0 && (
+          <div className="border-b border-border px-3 py-2 bg-card/50">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Map className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-[10px] font-cinzel text-muted-foreground">Mapas disponíveis:</span>
+              {allMaps.map(m => (
+                <button key={m.id} onClick={() => setViewingMap(m)}
+                  className={`rounded-sm border px-2 py-1 text-[10px] font-cinzel transition-colors ${m.is_active ? 'border-gold text-gold bg-gold/10' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                  {m.name} {m.is_active && '★'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {isMaster && allMaps.length > 0 && (
           <div className="border-b border-border px-3 py-2 bg-card/50">
             <div className="flex items-center gap-2 flex-wrap">
@@ -282,32 +348,42 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
           </div>
         )}
         <div className="flex flex-1 items-center justify-center">
-          <div className="text-center space-y-6">
-            <Users className="h-12 w-12 text-muted-foreground mx-auto" />
-            <h3 className="font-cinzel text-lg text-muted-foreground">Aguardando o mestre carregar um mapa...</h3>
-            <div className="flex flex-wrap justify-center gap-4 mt-6">
-              {members.map(m => {
-                const char = characters.find(c => c.user_id === m.user_id);
-                const isOnline = m.is_online !== false;
-                return (
-                  <div key={m.user_id} className={`flex flex-col items-center gap-2 transition-all ${!isOnline ? 'opacity-40 grayscale' : ''}`}>
-                    <div className="relative">
-                      <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-gold/50 bg-secondary overflow-hidden">
-                        {char?.icon_url ? (
-                          <img src={char.icon_url} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                          <span className="font-cinzel text-lg text-muted-foreground">{(char?.name || m.display_name)?.charAt(0)?.toUpperCase()}</span>
-                        )}
-                      </div>
-                      <div className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${isOnline ? 'bg-forest' : 'bg-muted-foreground'}`} />
-                    </div>
-                    <span className="text-xs font-cinzel text-muted-foreground">{char?.name || m.display_name}</span>
-                    {m.role === 'master' && <span className="text-[9px] text-gold font-cinzel">Mestre</span>}
-                  </div>
-                );
-              })}
+          {viewingMap ? (
+            <div className="w-full h-full p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="font-cinzel text-xs text-muted-foreground">{viewingMap.name}</span>
+                <button onClick={() => setViewingMap(null)} className="text-[10px] text-muted-foreground hover:text-foreground">✕ Fechar</button>
+              </div>
+              <img src={viewingMap.image_url} alt={viewingMap.name} className="max-h-[80%] w-full object-contain rounded-sm border border-border" />
             </div>
-          </div>
+          ) : (
+            <div className="text-center space-y-6">
+              <Users className="h-12 w-12 text-muted-foreground mx-auto" />
+              <h3 className="font-cinzel text-lg text-muted-foreground">Aguardando o mestre carregar um mapa...</h3>
+              <div className="flex flex-wrap justify-center gap-4 mt-6">
+                {members.map(m => {
+                  const char = characters.find(c => c.user_id === m.user_id);
+                  const isOnline = m.is_online !== false;
+                  return (
+                    <div key={m.user_id} className={`flex flex-col items-center gap-2 transition-all ${!isOnline ? 'opacity-40 grayscale' : ''}`}>
+                      <div className="relative">
+                        <div className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-gold/50 bg-secondary overflow-hidden">
+                          {char?.icon_url ? (
+                            <img src={char.icon_url} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <span className="font-cinzel text-lg text-muted-foreground">{(char?.name || m.display_name)?.charAt(0)?.toUpperCase()}</span>
+                          )}
+                        </div>
+                        <div className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-card ${isOnline ? 'bg-forest' : 'bg-muted-foreground'}`} />
+                      </div>
+                      <span className="text-xs font-cinzel text-muted-foreground">{char?.name || m.display_name}</span>
+                      {m.role === 'master' && <span className="text-[9px] text-gold font-cinzel">Mestre</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -339,13 +415,29 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
               )}
             </div>
           )}
+          {/* Player: view other maps */}
+          {!isMaster && allMaps.length > 1 && (
+            <div className="relative">
+              <button onClick={() => setShowViewMaps(!showViewMaps)}
+                className="rounded-sm border border-border px-1.5 py-0.5 text-[9px] text-muted-foreground hover:text-foreground">
+                <Map className="h-3 w-3" />
+              </button>
+              {showViewMaps && (
+                <div className="absolute top-full left-0 mt-1 z-30 bg-card border border-border rounded-sm shadow-lg min-w-[120px]">
+                  {allMaps.map(m => (
+                    <button key={m.id} onClick={() => { setViewingMap(m); setShowViewMaps(false); }}
+                      className={`block w-full text-left px-3 py-1.5 text-[10px] font-cinzel transition-colors ${
+                        m.is_active ? 'text-gold bg-gold/10' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
+                      }`}>
+                      {m.name} {m.is_active && '★'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-1">
-          {!isMaster && myCharacter && !tokens.find(t => t.character_id === myCharacter.id) && (
-            <button onClick={addMyToken} className="rounded-sm border border-gold bg-gold/10 px-2 py-1 text-[10px] font-cinzel text-gold hover:bg-gold/20 mr-2">
-              Entrar no mapa
-            </button>
-          )}
           {isMaster && (
             <>
               {/* Add Enemy/Player menu */}
@@ -356,7 +448,6 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
                 </button>
                 {showAddMenu && (
                   <div className="absolute top-full right-0 mt-1 z-30 bg-card border border-border rounded-sm shadow-lg min-w-[200px] max-h-64 overflow-y-auto">
-                    {/* Players section */}
                     <div className="px-3 py-1.5 border-b border-border">
                       <span className="text-[9px] font-cinzel text-gold flex items-center gap-1"><UserPlus className="h-3 w-3" /> Jogadores</span>
                     </div>
@@ -371,7 +462,6 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
                         </button>
                       ))
                     )}
-                    {/* Enemies section */}
                     <div className="px-3 py-1.5 border-b border-t border-border">
                       <span className="text-[9px] font-cinzel text-blood flex items-center gap-1"><Skull className="h-3 w-3" /> Inimigos</span>
                     </div>
@@ -388,11 +478,17 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-0.5 mr-1 border border-border rounded-sm px-1">
-                <button onClick={() => setTokenSize(s => Math.max(20, s - 5))} className="p-0.5 text-muted-foreground hover:text-gold"><Minus className="h-2.5 w-2.5" /></button>
-                <span className="text-[8px] text-muted-foreground w-5 text-center">{tokenSize}</span>
-                <button onClick={() => setTokenSize(s => Math.min(80, s + 5))} className="p-0.5 text-muted-foreground hover:text-gold"><Plus className="h-2.5 w-2.5" /></button>
-              </div>
+              {/* Resize selected tokens */}
+              {selectedTokens.size > 0 && (
+                <div className="flex items-center gap-0.5 mr-1 border border-gold/30 rounded-sm px-1 bg-gold/5">
+                  <Maximize2 className="h-2.5 w-2.5 text-gold" />
+                  <span className="text-[8px] text-gold">{selectedTokens.size}</span>
+                  <button onClick={() => resizeTokens(-5)} className="p-0.5 text-gold hover:text-gold-light"><Minus className="h-2.5 w-2.5" /></button>
+                  <button onClick={() => resizeTokens(5)} className="p-0.5 text-gold hover:text-gold-light"><Plus className="h-2.5 w-2.5" /></button>
+                  <button onClick={() => setSelectedTokens(new Set())} className="p-0.5 text-muted-foreground hover:text-foreground text-[8px]">✕</button>
+                </div>
+              )}
+              <span className="text-[8px] text-muted-foreground mr-1">Shift+arrastar: selecionar</span>
               <button onClick={() => setZoom(z => Math.min(3, z + 0.2))} className="p-1 text-muted-foreground hover:text-gold"><ZoomIn className="h-3.5 w-3.5" /></button>
               <button onClick={() => setZoom(z => Math.max(0.5, z - 0.2))} className="p-1 text-muted-foreground hover:text-gold"><ZoomOut className="h-3.5 w-3.5" /></button>
               <button onClick={resetView} className="p-1 text-muted-foreground hover:text-gold"><RotateCcw className="h-3.5 w-3.5" /></button>
@@ -409,13 +505,34 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
         onWheel={handleWheel}
         style={{ cursor: isPanning ? 'grabbing' : (isMaster ? 'grab' : 'default') }}
       >
+        {/* Viewing another map overlay (player) */}
+        {viewingMap && viewingMap.id !== activeMap.id && (
+          <div className="absolute inset-0 z-40 bg-background/90 flex flex-col items-center justify-center p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="font-cinzel text-sm text-muted-foreground">{viewingMap.name}</span>
+              <button onClick={() => setViewingMap(null)} className="text-xs text-gold hover:text-gold-light font-cinzel">← Voltar à cena</button>
+            </div>
+            <img src={viewingMap.image_url} alt={viewingMap.name} className="max-h-[80%] max-w-full object-contain rounded-sm border border-border" />
+          </div>
+        )}
+
+        {/* Selection rectangle */}
+        {isSelecting && (
+          <div className="fixed z-50 border-2 border-gold/60 bg-gold/10 pointer-events-none" style={{
+            left: Math.min(selectionStart.x, selectionEnd.x),
+            top: Math.min(selectionStart.y, selectionEnd.y),
+            width: Math.abs(selectionEnd.x - selectionStart.x),
+            height: Math.abs(selectionEnd.y - selectionStart.y),
+          }} />
+        )}
+
         <div
           ref={mapInnerRef}
           className="relative h-full w-full"
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: 'center center',
-            transition: draggingToken || isPanning ? 'none' : 'transform 0.2s',
+            transition: draggingToken || isPanning || isSelecting ? 'none' : 'transform 0.2s',
           }}
         >
           <img src={activeMap.image_url} alt={activeMap.name} className="h-full w-full object-contain" draggable={false} />
@@ -423,13 +540,16 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
           {/* Tokens */}
           {tokens.map(token => {
             const linkedChar = token.character_id ? characters.find(c => c.id === token.character_id) : null;
-            const currentHp = token.token_type === 'enemy' ? token.hit_points : (linkedChar as any)?.current_hp;
+            const currentHp = token.token_type === 'enemy' ? token.hit_points : linkedChar?.current_hp;
             const maxHp = token.token_type === 'enemy' ? token.max_hit_points : linkedChar?.hit_points;
+            const size = token.token_size || 40;
+            const isSelected = selectedTokens.has(token.id);
 
             return (
               <div
                 key={token.id}
-                className={`absolute flex flex-col items-center -translate-x-1/2 -translate-y-1/2 ${canDragToken(token) ? 'cursor-grab' : ''} ${draggingToken === token.id ? 'cursor-grabbing z-20' : 'z-10'}`}
+                data-token
+                className={`absolute flex flex-col items-center -translate-x-1/2 -translate-y-1/2 ${canDragToken(token) ? 'cursor-grab' : ''} ${draggingToken === token.id ? 'cursor-grabbing z-20' : 'z-10'} ${isSelected ? 'ring-2 ring-gold ring-offset-1 ring-offset-transparent rounded-full' : ''}`}
                 style={{ left: `${token.x_position}%`, top: `${token.y_position}%` }}
                 onMouseDown={e => handleMouseDown(e, token.id)}
                 onClick={e => { if (!draggingToken) { e.stopPropagation(); handleTokenClick(token); } }}
@@ -438,7 +558,7 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
                   token.token_type === 'enemy'
                     ? 'border-blood bg-blood/80 text-foreground'
                     : 'border-gold bg-gold/80 text-primary-foreground'
-                }`} style={{ width: tokenSize, height: tokenSize }}>
+                }`} style={{ width: size, height: size }}>
                   {token.icon_url ? (
                     <img src={token.icon_url} alt="" className="h-full w-full rounded-full object-cover" />
                   ) : (
@@ -459,10 +579,15 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
                     <span className="text-[8px] text-foreground">{currentHp}/{maxHp}</span>
                   </div>
                 )}
+                {/* Master: inline resize + remove */}
                 {isMaster && (
-                  <button onClick={(e) => { e.stopPropagation(); removeToken(token.id); }} className="mt-0.5 text-[8px] text-muted-foreground hover:text-destructive">
-                    <Trash2 className="h-2.5 w-2.5" />
-                  </button>
+                  <div className="mt-0.5 flex items-center gap-0.5">
+                    <button onClick={(e) => { e.stopPropagation(); resizeSingleToken(token.id, -5); }} className="text-[8px] text-muted-foreground hover:text-gold"><Minus className="h-2 w-2" /></button>
+                    <button onClick={(e) => { e.stopPropagation(); resizeSingleToken(token.id, 5); }} className="text-[8px] text-muted-foreground hover:text-gold"><Plus className="h-2 w-2" /></button>
+                    <button onClick={(e) => { e.stopPropagation(); removeToken(token.id); }} className="text-[8px] text-muted-foreground hover:text-destructive ml-0.5">
+                      <Trash2 className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
                 )}
               </div>
             );

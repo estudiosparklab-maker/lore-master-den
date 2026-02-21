@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { MessageSquare, Send, PanelRightClose, PanelRight } from 'lucide-react';
+import { MessageSquare, Send, PanelRightClose, PanelRight, Dices } from 'lucide-react';
+import type { Tables } from '@/integrations/supabase/types';
+
+type CharacterSheetRow = Tables<'character_sheets'>;
 
 interface Message {
   id: string;
@@ -11,15 +14,32 @@ interface Message {
   created_at: string;
 }
 
+interface DiceRoll {
+  id: string;
+  character_name: string | null;
+  num_dice: number;
+  num_faces: number;
+  results: number[];
+  total: number;
+  created_at: string;
+  user_id: string;
+}
+
+type FeedItem = 
+  | { type: 'message'; data: Message }
+  | { type: 'dice'; data: DiceRoll };
+
 interface Props {
   tableId: string;
   collapsed?: boolean;
   onToggle?: () => void;
+  characters?: CharacterSheetRow[];
 }
 
-const SceneChat = ({ tableId, collapsed, onToggle }: Props) => {
+const SceneChat = ({ tableId, collapsed, onToggle, characters = [] }: Props) => {
   const { user, profile } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
+  const [diceRolls, setDiceRolls] = useState<DiceRoll[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -29,8 +49,13 @@ const SceneChat = ({ tableId, collapsed, onToggle }: Props) => {
     if (data) setMessages(data as Message[]);
   };
 
-  useEffect(() => { fetchMessages(); }, [tableId]);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  const fetchDiceRolls = async () => {
+    const { data } = await supabase.from('dice_rolls').select('*').eq('table_id', tableId).order('created_at', { ascending: true }).limit(100);
+    if (data) setDiceRolls(data as DiceRoll[]);
+  };
+
+  useEffect(() => { fetchMessages(); fetchDiceRolls(); }, [tableId]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, diceRolls]);
 
   useEffect(() => {
     const channel = supabase
@@ -38,9 +63,24 @@ const SceneChat = ({ tableId, collapsed, onToggle }: Props) => {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'table_messages', filter: `table_id=eq.${tableId}` }, (payload) => {
         setMessages(prev => [...prev, payload.new as Message]);
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dice_rolls', filter: `table_id=eq.${tableId}` }, (payload) => {
+        setDiceRolls(prev => [...prev, payload.new as DiceRoll]);
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [tableId]);
+
+  // Merge messages and dice rolls into a single feed sorted by time
+  const feed: FeedItem[] = [
+    ...messages.map(m => ({ type: 'message' as const, data: m })),
+    ...diceRolls.map(d => ({ type: 'dice' as const, data: d })),
+  ].sort((a, b) => new Date(a.data.created_at).getTime() - new Date(b.data.created_at).getTime());
+
+  // Get character name for a user
+  const getCharacterName = (userId: string) => {
+    const char = characters.find(c => c.user_id === userId);
+    return char?.name || null;
+  };
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,9 +106,9 @@ const SceneChat = ({ tableId, collapsed, onToggle }: Props) => {
         <div className="mt-2">
           <MessageSquare className="h-4 w-4 text-gold/50" />
         </div>
-        {messages.length > 0 && (
+        {feed.length > 0 && (
           <span className="mt-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold/20 text-[8px] text-gold font-bold">
-            {messages.length > 99 ? '99+' : messages.length}
+            {feed.length > 99 ? '99+' : feed.length}
           </span>
         )}
       </div>
@@ -90,25 +130,55 @@ const SceneChat = ({ tableId, collapsed, onToggle }: Props) => {
         )}
       </div>
 
-      {/* Messages */}
+      {/* Feed */}
       <div className="flex-1 overflow-auto px-3 py-2 space-y-2">
-        {messages.map(msg => (
-          <div key={msg.id} className={`flex gap-2 ${msg.user_id === user?.id ? 'justify-end' : ''}`}>
-            <div className={`max-w-[85%] ${msg.user_id === user?.id ? 'order-2' : ''}`}>
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <span className="text-[10px] text-gold font-cinzel font-bold">{msg.display_name}</span>
-                <span className="text-[9px] text-muted-foreground">{formatTime(msg.created_at)}</span>
+        {feed.map(item => {
+          if (item.type === 'dice') {
+            const roll = item.data as DiceRoll;
+            return (
+              <div key={`dice-${roll.id}`} className="flex justify-center">
+                <div className="flex items-center gap-1.5 rounded-sm bg-gold/5 border border-gold/20 px-3 py-1.5 text-xs">
+                  <Dices className="h-3 w-3 text-gold" />
+                  <span className="text-gold font-cinzel font-bold">{roll.character_name || 'Anônimo'}</span>
+                  <span className="text-muted-foreground">rolou</span>
+                  <span className="text-foreground font-cinzel">{roll.num_dice}D{roll.num_faces}</span>
+                  <span className="text-muted-foreground">[{roll.results?.join(', ')}]</span>
+                  <span className="text-muted-foreground">=</span>
+                  <span className="text-gold font-bold text-sm">{roll.total}</span>
+                  <span className="text-muted-foreground/50 text-[9px] ml-1">{formatTime(roll.created_at)}</span>
+                </div>
               </div>
-              <div className={`rounded-sm px-3 py-1.5 text-sm ${
-                msg.user_id === user?.id
-                  ? 'bg-gold/10 text-foreground border border-gold/20'
-                  : 'bg-secondary text-foreground border border-border'
-              }`}>
-                {msg.message}
+            );
+          }
+
+          const msg = item.data as Message;
+          const charName = getCharacterName(msg.user_id);
+          const isMe = msg.user_id === user?.id;
+          return (
+            <div key={`msg-${msg.id}`} className={`flex gap-2 ${isMe ? 'justify-end' : ''}`}>
+              <div className={`max-w-[85%] ${isMe ? 'order-2' : ''}`}>
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  {charName ? (
+                    <>
+                      <span className="text-[10px] text-gold font-cinzel font-bold">{charName}</span>
+                      <span className="text-[9px] text-muted-foreground">({msg.display_name})</span>
+                    </>
+                  ) : (
+                    <span className="text-[10px] text-gold font-cinzel font-bold">{msg.display_name}</span>
+                  )}
+                  <span className="text-[9px] text-muted-foreground">{formatTime(msg.created_at)}</span>
+                </div>
+                <div className={`rounded-sm px-3 py-1.5 text-sm ${
+                  isMe
+                    ? 'bg-gold/10 text-foreground border border-gold/20'
+                    : 'bg-secondary text-foreground border border-border'
+                }`}>
+                  {msg.message}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
