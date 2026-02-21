@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Map, Upload, Trash2, Eye, Skull, X, Plus, Image } from 'lucide-react';
+import { Map, Upload, Trash2, Eye, Skull, X, Plus, Image, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface MapRow {
@@ -12,20 +12,33 @@ interface MapRow {
   created_at: string;
 }
 
+interface EnemyTemplate {
+  id: string;
+  table_id: string;
+  name: string;
+  hit_points: number;
+  icon_url: string | null;
+  created_at: string;
+}
+
 interface Props {
   tableId: string;
 }
 
 const MapManager = ({ tableId }: Props) => {
   const [maps, setMaps] = useState<MapRow[]>([]);
+  const [enemies, setEnemies] = useState<EnemyTemplate[]>([]);
   const [showMapForm, setShowMapForm] = useState(false);
   const [showEnemyForm, setShowEnemyForm] = useState(false);
   const [mapName, setMapName] = useState('');
+  const [mapFile, setMapFile] = useState<File | null>(null);
+  const [mapPreview, setMapPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [enemyName, setEnemyName] = useState('');
   const [enemyHp, setEnemyHp] = useState(10);
   const [enemyIconFile, setEnemyIconFile] = useState<File | null>(null);
   const [enemyIconPreview, setEnemyIconPreview] = useState<string | null>(null);
+  const [creatingEnemy, setCreatingEnemy] = useState(false);
   const [activeMapId, setActiveMapId] = useState<string | null>(null);
 
   const fetchMaps = async () => {
@@ -37,21 +50,36 @@ const MapManager = ({ tableId }: Props) => {
     }
   };
 
-  useEffect(() => { fetchMaps(); }, [tableId]);
+  const fetchEnemies = async () => {
+    const { data } = await supabase.from('table_enemies').select('*').eq('table_id', tableId).order('created_at');
+    if (data) setEnemies(data as EnemyTemplate[]);
+  };
+
+  useEffect(() => { fetchMaps(); fetchEnemies(); }, [tableId]);
 
   useEffect(() => {
     const channel = supabase
       .channel(`map-mgr-${tableId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'table_maps', filter: `table_id=eq.${tableId}` }, () => fetchMaps())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'table_enemies', filter: `table_id=eq.${tableId}` }, () => fetchEnemies())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [tableId]);
 
-  const uploadMap = async (file: File) => {
+  const handleMapFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setMapFile(file);
+      setMapPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const confirmUploadMap = async () => {
     if (!mapName.trim()) { toast.error('Dê um nome ao mapa'); return; }
+    if (!mapFile) { toast.error('Selecione uma imagem'); return; }
     setUploading(true);
-    const path = `${tableId}/${Date.now()}_${file.name}`;
-    const { error: uploadErr } = await supabase.storage.from('maps').upload(path, file);
+    const path = `${tableId}/${Date.now()}_${mapFile.name}`;
+    const { error: uploadErr } = await supabase.storage.from('maps').upload(path, mapFile);
     if (uploadErr) { toast.error('Erro no upload'); setUploading(false); return; }
 
     const { data: urlData } = supabase.storage.from('maps').getPublicUrl(path);
@@ -62,7 +90,7 @@ const MapManager = ({ tableId }: Props) => {
     });
 
     if (error) toast.error('Erro ao salvar mapa');
-    else { toast.success('Mapa adicionado!'); setMapName(''); setShowMapForm(false); fetchMaps(); }
+    else { toast.success('Mapa adicionado!'); setMapName(''); setMapFile(null); setMapPreview(null); setShowMapForm(false); fetchMaps(); }
     setUploading(false);
   };
 
@@ -87,8 +115,9 @@ const MapManager = ({ tableId }: Props) => {
     }
   };
 
-  const addEnemyToken = async () => {
-    if (!activeMapId || !enemyName.trim()) { toast.error('Selecione um mapa ativo e dê um nome'); return; }
+  const confirmCreateEnemy = async () => {
+    if (!enemyName.trim()) { toast.error('Dê um nome ao inimigo'); return; }
+    setCreatingEnemy(true);
 
     let iconUrl: string | null = null;
     if (enemyIconFile) {
@@ -100,14 +129,23 @@ const MapManager = ({ tableId }: Props) => {
       }
     }
 
-    await supabase.from('map_tokens').insert({
-      map_id: activeMapId, token_type: 'enemy', name: enemyName.trim(),
-      hit_points: enemyHp, max_hit_points: enemyHp,
-      icon_url: iconUrl, x_position: 50, y_position: 50,
+    const { error } = await supabase.from('table_enemies').insert({
+      table_id: tableId, name: enemyName.trim(), hit_points: enemyHp, icon_url: iconUrl,
     });
-    setEnemyName(''); setEnemyHp(10); setEnemyIconFile(null); setEnemyIconPreview(null);
-    setShowEnemyForm(false);
-    toast.success('Inimigo adicionado ao mapa!');
+
+    if (error) toast.error('Erro ao cadastrar inimigo');
+    else {
+      toast.success('Inimigo cadastrado!');
+      setEnemyName(''); setEnemyHp(10); setEnemyIconFile(null); setEnemyIconPreview(null);
+      setShowEnemyForm(false); fetchEnemies();
+    }
+    setCreatingEnemy(false);
+  };
+
+  const deleteEnemy = async (enemyId: string) => {
+    await supabase.from('table_enemies').delete().eq('id', enemyId);
+    fetchEnemies();
+    toast.success('Inimigo removido');
   };
 
   return (
@@ -134,13 +172,20 @@ const MapManager = ({ tableId }: Props) => {
         <div className="card-medieval p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-cinzel text-sm text-gold flex items-center gap-2"><Upload className="h-4 w-4" /> Novo Mapa</h3>
-            <button onClick={() => setShowMapForm(false)} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+            <button onClick={() => { setShowMapForm(false); setMapFile(null); setMapPreview(null); }} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
           </div>
           <input value={mapName} onChange={e => setMapName(e.target.value)} placeholder="Nome do mapa"
             className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none" />
-          <input type="file" accept="image/*" onChange={e => e.target.files?.[0] && uploadMap(e.target.files[0])}
+          <input type="file" accept="image/*" onChange={handleMapFile}
             className="w-full text-xs text-muted-foreground file:mr-2 file:rounded-sm file:border file:border-gold file:bg-gold/10 file:px-3 file:py-1.5 file:font-cinzel file:text-xs file:text-gold" />
-          {uploading && <p className="text-xs text-gold">Enviando...</p>}
+          {mapPreview && (
+            <img src={mapPreview} alt="Preview" className="w-full max-h-40 object-contain rounded-sm border border-border" />
+          )}
+          <button onClick={confirmUploadMap} disabled={uploading || !mapFile || !mapName.trim()}
+            className="flex items-center gap-2 rounded-sm border border-gold bg-gold/10 px-4 py-2 font-cinzel text-sm text-gold hover:bg-gold/20 disabled:opacity-50 transition-colors">
+            <Check className="h-4 w-4" />
+            {uploading ? 'Enviando...' : 'Confirmar Criação'}
+          </button>
         </div>
       )}
 
@@ -170,12 +215,43 @@ const MapManager = ({ tableId }: Props) => {
             <span className="text-sm text-muted-foreground font-cinzel">HP:</span>
             <input type="number" value={enemyHp} onChange={e => setEnemyHp(Number(e.target.value))} min={1}
               className="w-24 rounded-sm border border-border bg-input px-3 py-2 text-sm text-center text-foreground focus:border-gold focus:outline-none" />
-            <button onClick={addEnemyToken}
-              className="rounded-sm border border-blood bg-blood/10 px-4 py-2 font-cinzel text-sm text-blood hover:bg-blood/20">
-              Adicionar
-            </button>
           </div>
-          {!activeMapId && <p className="text-xs text-destructive">Ative um mapa antes de adicionar inimigos</p>}
+          <button onClick={confirmCreateEnemy} disabled={creatingEnemy || !enemyName.trim()}
+            className="flex items-center gap-2 rounded-sm border border-blood bg-blood/10 px-4 py-2 font-cinzel text-sm text-blood hover:bg-blood/20 disabled:opacity-50 transition-colors">
+            <Check className="h-4 w-4" />
+            {creatingEnemy ? 'Criando...' : 'Confirmar Cadastro'}
+          </button>
+        </div>
+      )}
+
+      {/* Enemy registry */}
+      {enemies.length > 0 && (
+        <div className="card-medieval p-4">
+          <h3 className="font-cinzel text-sm text-foreground mb-3 flex items-center gap-2">
+            <Skull className="h-4 w-4 text-blood" /> Inimigos Cadastrados ({enemies.length})
+          </h3>
+          <div className="space-y-2">
+            {enemies.map(enemy => (
+              <div key={enemy.id} className="flex items-center justify-between rounded-sm border border-border p-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full border border-blood/30 bg-secondary overflow-hidden">
+                    {enemy.icon_url ? (
+                      <img src={enemy.icon_url} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <Skull className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div>
+                    <span className="font-cinzel text-sm text-foreground">{enemy.name}</span>
+                    <span className="ml-2 text-[10px] text-blood font-cinzel">HP: {enemy.hit_points}</span>
+                  </div>
+                </div>
+                <button onClick={() => deleteEnemy(enemy.id)} className="rounded-sm border border-border p-1.5 text-muted-foreground hover:text-destructive hover:border-destructive" title="Remover">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { Trash2, ZoomIn, ZoomOut, RotateCcw, Users, Map, Minus, Plus, Heart } from 'lucide-react';
+import { Trash2, ZoomIn, ZoomOut, RotateCcw, Users, Map, Minus, Plus, Heart, Skull, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Tables } from '@/integrations/supabase/types';
@@ -30,6 +30,14 @@ interface TokenRow {
   y_position: number;
 }
 
+interface EnemyTemplate {
+  id: string;
+  table_id: string;
+  name: string;
+  hit_points: number;
+  icon_url: string | null;
+}
+
 interface MemberInfo {
   user_id: string;
   role: string;
@@ -51,6 +59,7 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
   const [activeMap, setActiveMap] = useState<MapRow | null>(null);
   const [allMaps, setAllMaps] = useState<MapRow[]>([]);
   const [tokens, setTokens] = useState<TokenRow[]>([]);
+  const [enemies, setEnemies] = useState<EnemyTemplate[]>([]);
   const [draggingToken, setDraggingToken] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -60,6 +69,7 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
   const [damageTarget, setDamageTarget] = useState<{ tokenId: string; charId: string | null; name: string; isEnemy: boolean } | null>(null);
   const [damageAmount, setDamageAmount] = useState(0);
   const [showMapSelector, setShowMapSelector] = useState(false);
+  const [showAddMenu, setShowAddMenu] = useState(false);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInnerRef = useRef<HTMLDivElement>(null);
 
@@ -79,13 +89,19 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
     if (data) setTokens(data as TokenRow[]);
   };
 
-  useEffect(() => { fetchMaps(); }, [tableId]);
+  const fetchEnemies = async () => {
+    const { data } = await supabase.from('table_enemies').select('*').eq('table_id', tableId);
+    if (data) setEnemies(data as EnemyTemplate[]);
+  };
+
+  useEffect(() => { fetchMaps(); fetchEnemies(); }, [tableId]);
   useEffect(() => { if (activeMap) fetchTokens(activeMap.id); else setTokens([]); }, [activeMap?.id]);
 
   useEffect(() => {
     const channel = supabase
       .channel(`scene-maps-${tableId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'table_maps', filter: `table_id=eq.${tableId}` }, () => fetchMaps())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'table_enemies', filter: `table_id=eq.${tableId}` }, () => fetchEnemies())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [tableId]);
@@ -126,6 +142,20 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
       name: char.name, icon_url: char.icon_url || null,
       x_position: 50, y_position: 50,
     });
+    toast.success(`${char.name} adicionado ao mapa!`);
+    setShowAddMenu(false);
+  };
+
+  const addEnemyToMap = async (enemy: EnemyTemplate) => {
+    if (!activeMap) return;
+    await supabase.from('map_tokens').insert({
+      map_id: activeMap.id, token_type: 'enemy',
+      name: enemy.name, icon_url: enemy.icon_url,
+      hit_points: enemy.hit_points, max_hit_points: enemy.hit_points,
+      x_position: 50, y_position: 50,
+    });
+    toast.success(`${enemy.name} adicionado ao mapa!`);
+    setShowAddMenu(false);
   };
 
   const removeToken = async (tokenId: string) => {
@@ -234,11 +264,9 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
 
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
-  // No map - show players with presence
   if (!activeMap) {
     return (
       <div className="flex h-full flex-col">
-        {/* Master map selector when no map */}
         {isMaster && allMaps.length > 0 && (
           <div className="border-b border-border px-3 py-2 bg-card/50">
             <div className="flex items-center gap-2 flex-wrap">
@@ -318,19 +346,48 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
               Entrar no mapa
             </button>
           )}
-          {isMaster && characters.length > 0 && (
-            <div className="flex items-center gap-1 mr-2">
-              <span className="text-[10px] text-muted-foreground font-cinzel">Add:</span>
-              {characters.map(char => (
-                <button key={char.id} onClick={() => addPlayerToken(char)}
-                  className="rounded-sm border border-border px-1.5 py-0.5 text-[9px] text-muted-foreground hover:border-gold hover:text-gold transition-colors">
-                  {char.name}
-                </button>
-              ))}
-            </div>
-          )}
           {isMaster && (
             <>
+              {/* Add Enemy/Player menu */}
+              <div className="relative mr-2">
+                <button onClick={() => setShowAddMenu(!showAddMenu)}
+                  className="flex items-center gap-1 rounded-sm border border-gold bg-gold/10 px-2 py-1 text-[10px] font-cinzel text-gold hover:bg-gold/20">
+                  <Plus className="h-3 w-3" /> Adicionar
+                </button>
+                {showAddMenu && (
+                  <div className="absolute top-full right-0 mt-1 z-30 bg-card border border-border rounded-sm shadow-lg min-w-[200px] max-h-64 overflow-y-auto">
+                    {/* Players section */}
+                    <div className="px-3 py-1.5 border-b border-border">
+                      <span className="text-[9px] font-cinzel text-gold flex items-center gap-1"><UserPlus className="h-3 w-3" /> Jogadores</span>
+                    </div>
+                    {characters.length === 0 ? (
+                      <div className="px-3 py-1.5 text-[10px] text-muted-foreground">Nenhuma ficha</div>
+                    ) : (
+                      characters.map(char => (
+                        <button key={char.id} onClick={() => addPlayerToken(char)}
+                          disabled={!!tokens.find(t => t.character_id === char.id)}
+                          className="block w-full text-left px-3 py-1.5 text-[10px] font-cinzel text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors disabled:opacity-40 disabled:cursor-default">
+                          {char.name} {tokens.find(t => t.character_id === char.id) ? '(no mapa)' : ''}
+                        </button>
+                      ))
+                    )}
+                    {/* Enemies section */}
+                    <div className="px-3 py-1.5 border-b border-t border-border">
+                      <span className="text-[9px] font-cinzel text-blood flex items-center gap-1"><Skull className="h-3 w-3" /> Inimigos</span>
+                    </div>
+                    {enemies.length === 0 ? (
+                      <div className="px-3 py-1.5 text-[10px] text-muted-foreground">Cadastre inimigos na aba Mapa</div>
+                    ) : (
+                      enemies.map(enemy => (
+                        <button key={enemy.id} onClick={() => addEnemyToMap(enemy)}
+                          className="block w-full text-left px-3 py-1.5 text-[10px] font-cinzel text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                          {enemy.name} <span className="text-blood">HP:{enemy.hit_points}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-0.5 mr-1 border border-border rounded-sm px-1">
                 <button onClick={() => setTokenSize(s => Math.max(20, s - 5))} className="p-0.5 text-muted-foreground hover:text-gold"><Minus className="h-2.5 w-2.5" /></button>
                 <span className="text-[8px] text-muted-foreground w-5 text-center">{tokenSize}</span>
@@ -393,7 +450,6 @@ const SceneView = ({ tableId, isMaster, characters, members, onRefresh }: Props)
                 }`}>
                   {token.name}
                 </span>
-                {/* HP bar */}
                 {maxHp && maxHp > 0 && (
                   <div className="mt-0.5 flex items-center gap-1">
                     <div className="h-1.5 w-14 rounded-full bg-secondary overflow-hidden">

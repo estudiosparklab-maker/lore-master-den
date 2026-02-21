@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import AppLayout from '@/components/AppLayout';
-import { Crown, UserPlus, Trash2, Shield, Sword, Users } from 'lucide-react';
+import { Crown, UserPlus, Trash2, Shield, Sword, Users, Mail, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Database } from '@/integrations/supabase/types';
 
@@ -12,6 +12,8 @@ interface UserData {
   user_id: string;
   display_name: string;
   role: AppRole;
+  email?: string;
+  last_sign_in_at?: string | null;
 }
 
 const AdminDashboard = () => {
@@ -19,26 +21,36 @@ const AdminDashboard = () => {
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Create user form
   const [showForm, setShowForm] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newName, setNewName] = useState('');
   const [newRole, setNewRole] = useState<AppRole>('player');
   const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchUsers = async () => {
-    const { data: profiles } = await supabase.from('profiles').select('user_id, display_name');
-    const { data: roles } = await supabase.from('user_roles').select('user_id, role');
+    const [profilesRes, rolesRes, authRes] = await Promise.all([
+      supabase.from('profiles').select('user_id, display_name'),
+      supabase.from('user_roles').select('user_id, role'),
+      supabase.functions.invoke('admin-users', { method: 'GET' }),
+    ]);
 
-    if (profiles && roles) {
-      const merged: UserData[] = profiles.map(p => ({
+    const profiles = profilesRes.data || [];
+    const roles = rolesRes.data || [];
+    const authUsers: Array<{ id: string; email: string; last_sign_in_at: string | null }> = authRes.data?.users || [];
+
+    const merged: UserData[] = profiles.map(p => {
+      const authUser = authUsers.find(u => u.id === p.user_id);
+      return {
         user_id: p.user_id,
         display_name: p.display_name,
         role: roles.find(r => r.user_id === p.user_id)?.role || 'player',
-      }));
-      setUsers(merged);
-    }
+        email: authUser?.email,
+        last_sign_in_at: authUser?.last_sign_in_at,
+      };
+    });
+    setUsers(merged);
     setLoading(false);
   };
 
@@ -49,7 +61,6 @@ const AdminDashboard = () => {
     if (!newEmail || !newPassword || !newName) return;
     setCreating(true);
 
-    // Create user via edge function (uses service role)
     const { data: result, error } = await supabase.functions.invoke('create-user', {
       body: { email: newEmail, password: newPassword, display_name: newName, role: newRole },
     });
@@ -61,23 +72,33 @@ const AdminDashboard = () => {
     }
 
     toast.success(`Aventureiro "${newName}" cadastrado como ${newRole}!`);
-    setNewEmail('');
-    setNewPassword('');
-    setNewName('');
-    setNewRole('player');
-    setShowForm(false);
-    setCreating(false);
+    setNewEmail(''); setNewPassword(''); setNewName(''); setNewRole('player');
+    setShowForm(false); setCreating(false);
     fetchUsers();
   };
 
   const updateRole = async (userId: string, newRole: AppRole) => {
     const { error } = await supabase.from('user_roles').update({ role: newRole }).eq('user_id', userId);
-    if (error) {
-      toast.error('Erro ao atualizar papel');
+    if (error) toast.error('Erro ao atualizar papel');
+    else { toast.success('Papel atualizado!'); fetchUsers(); }
+  };
+
+  const deleteUser = async (userId: string, displayName: string) => {
+    if (!confirm(`Tem certeza que deseja excluir "${displayName}"? Esta ação é irreversível.`)) return;
+    setDeletingId(userId);
+
+    const { data, error } = await supabase.functions.invoke('admin-users', {
+      method: 'DELETE',
+      body: { user_id: userId },
+    });
+
+    if (error || data?.error) {
+      toast.error('Erro ao excluir: ' + (data?.error || error?.message));
     } else {
-      toast.success('Papel atualizado!');
+      toast.success(`"${displayName}" foi removido do reino.`);
       fetchUsers();
     }
+    setDeletingId(null);
   };
 
   if (role !== 'admin') {
@@ -92,6 +113,11 @@ const AdminDashboard = () => {
     }
   };
 
+  const formatDate = (dateStr?: string | null) => {
+    if (!dateStr) return 'Nunca';
+    return new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
     <AppLayout requiredRole="admin">
       <div className="mx-auto max-w-4xl">
@@ -100,12 +126,9 @@ const AdminDashboard = () => {
             <h1 className="font-cinzel text-2xl text-gold-gradient">Administração do Reino</h1>
             <p className="mt-1 text-sm text-muted-foreground">Gerencie os aventureiros do reino</p>
           </div>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 rounded-sm border border-gold bg-gold/10 px-4 py-2 font-cinzel text-sm text-gold transition-all hover:bg-gold/20"
-          >
-            <UserPlus className="h-4 w-4" />
-            Novo Aventureiro
+          <button onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-2 rounded-sm border border-gold bg-gold/10 px-4 py-2 font-cinzel text-sm text-gold transition-all hover:bg-gold/20">
+            <UserPlus className="h-4 w-4" /> Novo Aventureiro
           </button>
         </div>
 
@@ -151,7 +174,6 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* Users list */}
         <div className="card-medieval overflow-hidden">
           <div className="border-b border-border px-6 py-4">
             <div className="flex items-center gap-2">
@@ -170,17 +192,34 @@ const AdminDashboard = () => {
                     <div>
                       <p className="font-cinzel text-sm text-foreground">{u.display_name}</p>
                       <p className="text-xs capitalize text-muted-foreground">{u.role === 'admin' ? 'Administrador' : u.role === 'master' ? 'Mestre' : 'Jogador'}</p>
+                      <div className="flex items-center gap-3 mt-1">
+                        {u.email && (
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                            <Mail className="h-3 w-3" /> {u.email}
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <Clock className="h-3 w-3" /> {formatDate(u.last_sign_in_at)}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                  <select
-                    value={u.role}
-                    onChange={e => updateRole(u.user_id, e.target.value as AppRole)}
-                    className="rounded-sm border border-border bg-input px-3 py-1.5 text-xs text-foreground focus:border-gold focus:outline-none"
-                  >
-                    <option value="player">Jogador</option>
-                    <option value="master">Mestre</option>
-                    <option value="admin">Administrador</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select value={u.role} onChange={e => updateRole(u.user_id, e.target.value as AppRole)}
+                      className="rounded-sm border border-border bg-input px-3 py-1.5 text-xs text-foreground focus:border-gold focus:outline-none">
+                      <option value="player">Jogador</option>
+                      <option value="master">Mestre</option>
+                      <option value="admin">Administrador</option>
+                    </select>
+                    {u.role !== 'admin' && (
+                      <button onClick={() => deleteUser(u.user_id, u.display_name)}
+                        disabled={deletingId === u.user_id}
+                        className="rounded-sm border border-destructive/50 p-1.5 text-muted-foreground hover:text-destructive hover:border-destructive transition-colors disabled:opacity-50"
+                        title="Excluir usuário">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
               {users.length === 0 && (
