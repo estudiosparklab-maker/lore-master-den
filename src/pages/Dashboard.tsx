@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import AppLayout from '@/components/AppLayout';
 import { Link } from 'react-router-dom';
-import { Plus, Users, ScrollText, Copy, Check } from 'lucide-react';
+import { Plus, Users, ScrollText, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 
@@ -69,19 +69,8 @@ const Dashboard = () => {
     fetchTables();
   };
 
-  const createInviteLink = async (tableId: string) => {
-    if (!user) return;
-    const { data, error } = await supabase.from('table_invitations').insert({
-      table_id: tableId,
-      invited_by: user.id,
-    }).select('token').single();
-
-    if (error) {
-      toast.error('Erro ao criar convite');
-      return;
-    }
-
-    const link = `${window.location.origin}/invite/${data.token}`;
+  const shareTableLink = (tableId: string) => {
+    const link = `${window.location.origin}/join/${tableId}`;
     navigator.clipboard.writeText(link);
     toast.success('Link de convite copiado!');
   };
@@ -177,7 +166,7 @@ const Dashboard = () => {
                       </span>
                       {isMaster && table.created_by === user?.id && (
                         <button
-                          onClick={(e) => { e.preventDefault(); createInviteLink(table.id); }}
+                          onClick={(e) => { e.preventDefault(); shareTableLink(table.id); }}
                           className="flex items-center gap-1 text-xs text-gold hover:text-gold-light transition-colors"
                         >
                           <Copy className="h-3 w-3" />

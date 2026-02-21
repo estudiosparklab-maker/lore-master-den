@@ -10,7 +10,7 @@ import SceneChat from '@/components/SceneChat';
 import DiceFeed from '@/components/DiceFeed';
 import MapManager from '@/components/MapManager';
 import Journal from '@/components/Journal';
-import { ArrowLeft, Plus, Swords, Copy, Users, Map, Dices, Eye, Share2, BookOpen, CheckSquare, Trash2, Zap, Heart, ShieldOff, Sparkles } from 'lucide-react';
+import { ArrowLeft, Plus, Swords, Copy, Users, Map, Dices, Eye, BookOpen, CheckSquare, Trash2, Zap, Heart, ShieldOff, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import type { Tables } from '@/integrations/supabase/types';
@@ -117,22 +117,11 @@ const TableView = () => {
     fetchData();
   };
 
-  const createInviteLink = async () => {
-    if (!user || !id) return;
-    const { data, error } = await supabase.from('table_invitations').insert({
-      table_id: id, invited_by: user.id,
-    }).select('token').single();
-    if (error) { toast.error('Erro ao criar convite'); return; }
-    const link = `${window.location.origin}/invite/${data.token}`;
-    navigator.clipboard.writeText(link);
-    toast.success('Link de convite copiado!');
-  };
-
   const shareTableLink = () => {
     if (!id) return;
     const link = `${window.location.origin}/join/${id}`;
     navigator.clipboard.writeText(link);
-    toast.success('Link da mesa copiado!');
+    toast.success('Link de convite copiado!');
   };
 
   // Bulk actions
@@ -242,9 +231,6 @@ const TableView = () => {
             {isMaster && (
               <>
                 <button onClick={shareTableLink} className="flex items-center gap-1 rounded-sm border border-border px-2 py-1 font-cinzel text-[10px] text-muted-foreground hover:border-gold hover:text-gold transition-colors">
-                  <Share2 className="h-3 w-3" /> Compartilhar
-                </button>
-                <button onClick={createInviteLink} className="flex items-center gap-1 rounded-sm border border-border px-2 py-1 font-cinzel text-[10px] text-muted-foreground hover:border-gold hover:text-gold transition-colors">
                   <Copy className="h-3 w-3" /> Convite
                 </button>
                 <button onClick={() => setShowCreate(true)} className="flex items-center gap-1 rounded-sm border border-gold bg-gold/10 px-2 py-1 font-cinzel text-[10px] text-gold hover:bg-gold/20 transition-colors">
