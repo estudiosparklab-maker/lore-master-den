@@ -1,13 +1,20 @@
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { X, Save, Heart, Sparkles, Coins, Swords, Shield, BookOpen, Upload } from 'lucide-react';
+import { X, Save, Heart, Sparkles, Coins, Swords, Shield, BookOpen, Upload, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Tables } from '@/integrations/supabase/types';
 import parchmentBg from '@/assets/parchment-bg.jpg';
 
 type CharacterSheetRow = Tables<'character_sheets'>;
+
+interface BackpackItem {
+  name: string;
+  description: string;
+  quantity: number;
+  weight: number; // per unit
+}
 
 interface Props {
   character: CharacterSheetRow;
@@ -25,7 +32,20 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'info' | 'attributes' | 'equipment' | 'backpack'>('info');
 
-  // XP/Level system: level = floor(xp / 100), capped at maxLevel
+  // Backpack structured data
+  const [backpackItems, setBackpackItems] = useState<BackpackItem[]>(() => {
+    try {
+      const bd = (character as any).backpack_data;
+      return Array.isArray(bd) && bd.length > 0 ? bd : [];
+    } catch { return []; }
+  });
+  const [mountItems, setMountItems] = useState<BackpackItem[]>(() => {
+    try {
+      const md = (character as any).mount_data;
+      return Array.isArray(md) && md.length > 0 ? md : [];
+    } catch { return []; }
+  });
+
   const calculatedLevel = Math.min(Math.floor((data.xp || 0) / 100), maxLevel);
   const xpForNextLevel = (calculatedLevel + 1) * 100;
   const xpProgress = ((data.xp || 0) % 100);
@@ -37,16 +57,21 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
   const handleSave = async () => {
     setSaving(true);
     const { id, created_at, table_id, user_id, ...updateData } = data;
-    // Auto-calculate level from XP
     updateData.level = calculatedLevel;
+    updateData.backpack_data = backpackItems;
+    updateData.mount_data = mountItems;
 
-    // If player (not master), strip gold/xp/level fields
     if (isOwner && !isMaster) {
       delete updateData.gold;
       delete updateData.silver;
       delete updateData.copper;
       delete updateData.xp;
       delete updateData.level;
+      // Players can't edit backpack
+      delete updateData.backpack_data;
+      delete updateData.mount_data;
+      delete updateData.backpack_max_load;
+      delete updateData.mount_max_load;
     }
 
     const { error } = await supabase.from('character_sheets').update(updateData).eq('id', character.id);
@@ -66,14 +91,18 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
     toast.success('Ícone atualizado! Salve a ficha.');
   };
 
+  // Master fields increment by 5
+  const masterStep = 5;
+
   const NumberField = ({ label, field, min = 0, max, masterOnly = false }: { label: string; field: string; min?: number; max?: number; masterOnly?: boolean }) => {
     const editable = masterOnly ? isMaster : canEdit;
+    const step = (masterOnly && isMaster) ? masterStep : 1;
     return (
       <div className="flex items-center justify-between py-1.5">
         <span className="text-sm text-foreground">{label}</span>
         {editable ? (
           <input type="number" value={data[field]} onChange={e => update(field, Number(e.target.value))}
-            min={min} max={max}
+            min={min} max={max} step={step}
             className="w-16 rounded-sm border border-border bg-input px-2 py-1 text-center text-sm text-foreground focus:border-gold focus:outline-none" />
         ) : (
           <span className="font-bold text-sm text-gold">{data[field]}</span>
@@ -91,6 +120,91 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
       ) : (
         <p className="text-sm text-foreground">{data[field] || '—'}</p>
       )}
+    </div>
+  );
+
+  // Backpack weight calculations
+  const totalBackpackWeight = backpackItems.reduce((sum, item) => sum + item.quantity * item.weight, 0);
+  const totalMountWeight = mountItems.reduce((sum, item) => sum + item.quantity * item.weight, 0);
+  const backpackMaxLoad = data.backpack_max_load || 10;
+  const mountMaxLoad = data.mount_max_load || 5;
+
+  const addBackpackItem = () => setBackpackItems(prev => [...prev, { name: '', description: '', quantity: 1, weight: 0 }]);
+  const removeBackpackItem = (i: number) => setBackpackItems(prev => prev.filter((_, idx) => idx !== i));
+  const updateBackpackItem = (i: number, field: keyof BackpackItem, value: any) => {
+    setBackpackItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
+  };
+
+  const addMountItem = () => setMountItems(prev => [...prev, { name: '', description: '', quantity: 1, weight: 0 }]);
+  const removeMountItem = (i: number) => setMountItems(prev => prev.filter((_, idx) => idx !== i));
+  const updateMountItem = (i: number, field: keyof BackpackItem, value: any) => {
+    setMountItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
+  };
+
+  const ItemTable = ({ items, onUpdate, onRemove, onAdd, totalWeight, maxLoad, label }: {
+    items: BackpackItem[]; onUpdate: (i: number, f: keyof BackpackItem, v: any) => void;
+    onRemove: (i: number) => void; onAdd: () => void;
+    totalWeight: number; maxLoad: number; label: string;
+  }) => (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h4 className="font-cinzel text-xs text-muted-foreground">{label}</h4>
+        {isMaster && (
+          <button onClick={onAdd} className="flex items-center gap-1 text-[10px] text-gold hover:text-gold-light">
+            <Plus className="h-3 w-3" /> Adicionar
+          </button>
+        )}
+      </div>
+      {/* Load bar */}
+      <div>
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+          <span>Carga</span>
+          <span className={totalWeight > maxLoad ? 'text-blood font-bold' : ''}>{totalWeight.toFixed(1)} / {maxLoad}</span>
+        </div>
+        <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${totalWeight > maxLoad ? 'bg-blood' : 'bg-gold'}`}
+            style={{ width: `${Math.min((totalWeight / maxLoad) * 100, 100)}%` }} />
+        </div>
+      </div>
+      {items.length === 0 && <p className="text-[10px] text-muted-foreground italic">Nenhum item</p>}
+      {items.map((item, i) => (
+        <div key={i} className="rounded-sm border border-border bg-secondary/30 p-2 space-y-1">
+          {isMaster ? (
+            <>
+              <div className="flex items-center gap-2">
+                <input value={item.name} onChange={e => onUpdate(i, 'name', e.target.value)} placeholder="Nome"
+                  className="flex-1 rounded-sm border border-border bg-input px-2 py-1 text-xs text-foreground focus:border-gold focus:outline-none" />
+                <button onClick={() => onRemove(i)} className="text-muted-foreground hover:text-destructive">
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+              <input value={item.description} onChange={e => onUpdate(i, 'description', e.target.value)} placeholder="Descrição"
+                className="w-full rounded-sm border border-border bg-input px-2 py-1 text-[10px] text-foreground focus:border-gold focus:outline-none" />
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] text-muted-foreground">Qtd:</span>
+                  <input type="number" min={1} value={item.quantity} onChange={e => onUpdate(i, 'quantity', Math.max(1, Number(e.target.value)))}
+                    className="w-12 rounded-sm border border-border bg-input px-1 py-0.5 text-[10px] text-center text-foreground focus:border-gold focus:outline-none" />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[9px] text-muted-foreground">Peso/un:</span>
+                  <input type="number" min={0} step={0.1} value={item.weight} onChange={e => onUpdate(i, 'weight', Math.max(0, Number(e.target.value)))}
+                    className="w-14 rounded-sm border border-border bg-input px-1 py-0.5 text-[10px] text-center text-foreground focus:border-gold focus:outline-none" />
+                </div>
+                <span className="text-[9px] text-muted-foreground ml-auto">Total: {(item.quantity * item.weight).toFixed(1)}</span>
+              </div>
+            </>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-foreground font-bold">{item.name || '—'}</span>
+                <span className="text-[9px] text-muted-foreground">x{item.quantity} ({(item.quantity * item.weight).toFixed(1)})</span>
+              </div>
+              {item.description && <p className="text-[10px] text-muted-foreground italic">{item.description}</p>}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 
@@ -125,7 +239,6 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
               {/* Header */}
               <div className="flex items-start justify-between border-b border-border p-6">
                 <div className="flex items-center gap-4">
-                  {/* Character icon */}
                   <div className="relative">
                     <div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-gold/30 bg-secondary overflow-hidden">
                       {data.icon_url ? (
@@ -239,7 +352,7 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
                           <h3 className="font-cinzel text-sm text-foreground">Saúde</h3>
                         </div>
                         <NumberField label="HP Total" field="hit_points" />
-                        <NumberField label="HP Atual" field="current_hp" />
+                        <NumberField label="HP Atual" field="current_hp" masterOnly />
                         <div className="mt-2">
                           <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
                             <div className="h-full bg-blood rounded-full transition-all" style={{ width: `${data.hit_points > 0 ? (data.current_hp / data.hit_points) * 100 : 0}%` }} />
@@ -339,42 +452,36 @@ const CharacterSheet = ({ character, isMaster, maxLevel, onClose, onUpdate }: Pr
                 {tab === 'backpack' && (
                   <div className="space-y-6">
                     <div className="card-medieval p-4">
-                      <h3 className="font-cinzel text-sm text-foreground mb-3">Mochila</h3>
-                      <NumberField label="Carga Máxima" field="backpack_max_load" />
-                      <div className="mt-3">
-                        <label className="mb-1 block font-cinzel text-xs text-muted-foreground">Itens (um por linha)</label>
-                        {canEdit ? (
-                          <textarea
-                            value={(data.backpack_items || []).join('\n')}
-                            onChange={e => update('backpack_items', e.target.value.split('\n').filter(Boolean))}
-                            rows={5}
-                            className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none"
-                            placeholder="Corda de cânhamo&#10;Tocha&#10;Ração de viagem" />
-                        ) : (
-                          <ul className="text-sm text-foreground space-y-1">
-                            {(data.backpack_items || []).map((item: string, i: number) => <li key={i}>• {item}</li>)}
-                          </ul>
-                        )}
+                      <div className="flex items-center gap-2 mb-3">
+                        <Sparkles className="h-4 w-4 text-gold" />
+                        <h3 className="font-cinzel text-sm text-foreground">Mochila</h3>
                       </div>
+                      {isMaster && <NumberField label="Carga Máxima" field="backpack_max_load" />}
+                      <ItemTable
+                        items={backpackItems}
+                        onUpdate={updateBackpackItem}
+                        onRemove={removeBackpackItem}
+                        onAdd={addBackpackItem}
+                        totalWeight={totalBackpackWeight}
+                        maxLoad={backpackMaxLoad}
+                        label="Itens da Mochila"
+                      />
                     </div>
 
                     <div className="card-medieval p-4">
                       <h3 className="font-cinzel text-sm text-foreground mb-3">Montaria</h3>
                       <TextField label="Nome da Montaria" field="mount_name" />
-                      <div className="mt-2"><NumberField label="Carga Máxima" field="mount_max_load" /></div>
+                      {isMaster && <div className="mt-2"><NumberField label="Carga Máxima" field="mount_max_load" /></div>}
                       <div className="mt-3">
-                        <label className="mb-1 block font-cinzel text-xs text-muted-foreground">Itens na Montaria (um por linha)</label>
-                        {canEdit ? (
-                          <textarea
-                            value={(data.mount_items || []).join('\n')}
-                            onChange={e => update('mount_items', e.target.value.split('\n').filter(Boolean))}
-                            rows={3}
-                            className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm text-foreground focus:border-gold focus:outline-none" />
-                        ) : (
-                          <ul className="text-sm text-foreground space-y-1">
-                            {(data.mount_items || []).map((item: string, i: number) => <li key={i}>• {item}</li>)}
-                          </ul>
-                        )}
+                        <ItemTable
+                          items={mountItems}
+                          onUpdate={updateMountItem}
+                          onRemove={removeMountItem}
+                          onAdd={addMountItem}
+                          totalWeight={totalMountWeight}
+                          maxLoad={mountMaxLoad}
+                          label="Itens da Montaria"
+                        />
                       </div>
                     </div>
                   </div>
