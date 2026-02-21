@@ -391,6 +391,41 @@ export type Database = {
         }
         Relationships: []
       }
+      table_enemies: {
+        Row: {
+          created_at: string
+          hit_points: number
+          icon_url: string | null
+          id: string
+          name: string
+          table_id: string
+        }
+        Insert: {
+          created_at?: string
+          hit_points?: number
+          icon_url?: string | null
+          id?: string
+          name: string
+          table_id: string
+        }
+        Update: {
+          created_at?: string
+          hit_points?: number
+          icon_url?: string | null
+          id?: string
+          name?: string
+          table_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "table_enemies_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "game_tables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       table_invitations: {
         Row: {
           created_at: string
